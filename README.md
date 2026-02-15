@@ -80,4 +80,10 @@ INFO  [request_id=abc-123] Request START POST /api/login | Body: {"username":"jo
 INFO  [request_id=abc-123, request_duration=45] Request END POST /api/login | Status: 200 | Body: {"token":"***"} | Time: 45ms
 ```
 
+Outgoing HTTP calls also get an `external_api_duration` MDC key (in milliseconds) on their END/FAILED log lines:
+
+```
+INFO  [request_id=abc-123, external_api_duration=120] Payment API request END https://api.pay.com/charge | 200 | Response: {...} | Time: 120ms
+```
+
 Paths containing `actuator`, `swagger`, `open-api`, or `api-docs` are automatically excluded.
