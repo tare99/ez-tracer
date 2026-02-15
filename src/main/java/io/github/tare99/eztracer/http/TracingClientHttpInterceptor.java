@@ -9,6 +9,7 @@ import java.util.List;
 import lombok.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpRequest;
 import org.springframework.http.HttpStatusCode;
@@ -18,9 +19,9 @@ import org.springframework.http.client.ClientHttpResponse;
 
 public class TracingClientHttpInterceptor implements ClientHttpRequestInterceptor {
 
+  public static final String MDC_EXTERNAL_API_DURATION = "external_api_duration";
   private static final Logger log = LoggerFactory.getLogger(TracingClientHttpInterceptor.class);
   private static final BodyMasker NO_OP_MASKER = new BodyMasker(List.of(), "");
-
   private final String label;
   private final BodyMasker bodyMasker;
 
@@ -54,6 +55,7 @@ public class TracingClientHttpInterceptor implements ClientHttpRequestIntercepto
     try {
       ClientHttpResponse response = execution.execute(request, body);
       long durationMs = (System.nanoTime() - start) / 1_000_000;
+      MDC.put(MDC_EXTERNAL_API_DURATION, String.valueOf(durationMs));
 
       byte[] responseBodyBytes = response.getBody().readAllBytes();
       String responseBody = bodyMasker.mask(new String(responseBodyBytes, StandardCharsets.UTF_8));
@@ -68,9 +70,12 @@ public class TracingClientHttpInterceptor implements ClientHttpRequestIntercepto
       return new BufferedClientHttpResponse(response, responseBodyBytes);
     } catch (IOException e) {
       long durationMs = (System.nanoTime() - start) / 1_000_000;
+      MDC.put(MDC_EXTERNAL_API_DURATION, String.valueOf(durationMs));
       log.error(
           "{} request FAILED {} | {} | Time: {}ms", label, url, e.getMessage(), durationMs, e);
       throw e;
+    } finally {
+      MDC.remove(MDC_EXTERNAL_API_DURATION);
     }
   }
 
