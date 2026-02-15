@@ -1,5 +1,6 @@
 package io.github.tare99.eztracer.filter;
 
+import io.github.tare99.eztracer.mask.BodyMasker;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
@@ -25,31 +26,42 @@ public class HttpRequestTracingFilter extends OncePerRequestFilter {
   private static final Set<String> IGNORED_PATHS =
       Set.of("actuator", "swagger", "open-api", "api-docs");
 
+  private final BodyMasker bodyMasker;
+
+  public HttpRequestTracingFilter(BodyMasker bodyMasker) {
+    this.bodyMasker = bodyMasker;
+  }
+
   @Override
   protected void doFilterInternal(
-      @NonNull HttpServletRequest request, @NonNull HttpServletResponse response, FilterChain chain)
+      @NonNull HttpServletRequest request,
+      @NonNull HttpServletResponse response,
+      @NonNull FilterChain chain)
       throws ServletException, IOException {
 
     ContentCachingRequestWrapper wrappedRequest = new ContentCachingRequestWrapper(request);
     ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(response);
 
-    long startNanos = System.nanoTime();
+    String requestUri = getOriginalUri(request);
+    String requestId = UUID.randomUUID().toString();
+    long startNanos = 0;
     try {
+      if (shouldNotIgnore(requestUri)) {
+        MDC.put(MDC_REQUEST_ID, requestId);
+        String requestBody =
+            bodyMasker.mask(
+                new String(wrappedRequest.getContentAsByteArray(), StandardCharsets.UTF_8));
+        log.info("Request START {} {} | Body: {}", request.getMethod(), requestUri, requestBody);
+        startNanos = System.nanoTime();
+      }
       chain.doFilter(wrappedRequest, wrappedResponse);
     } finally {
       long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
-      String requestUri = getOriginalUri(request);
-      if (!shouldIgnore(requestUri)) {
-        String requestId = UUID.randomUUID().toString();
-        MDC.put(MDC_REQUEST_ID, requestId);
+      if (shouldNotIgnore(requestUri)) {
         MDC.put(MDC_REQUEST_DURATION, String.valueOf(durationMs));
-
-        String requestBody =
-            new String(wrappedRequest.getContentAsByteArray(), StandardCharsets.UTF_8);
-        log.info("Request START {} {} | Body: {}", request.getMethod(), requestUri, requestBody);
-
         String responseBody =
-            new String(wrappedResponse.getContentAsByteArray(), StandardCharsets.UTF_8);
+            bodyMasker.mask(
+                new String(wrappedResponse.getContentAsByteArray(), StandardCharsets.UTF_8));
         log.info(
             "Request END {} {} | Status: {} | Body: {} | Time: {}ms",
             request.getMethod(),
@@ -57,16 +69,15 @@ public class HttpRequestTracingFilter extends OncePerRequestFilter {
             wrappedResponse.getStatus(),
             responseBody,
             durationMs);
+        MDC.remove(MDC_REQUEST_DURATION);
+        MDC.remove(MDC_REQUEST_ID);
       }
-
       wrappedResponse.copyBodyToResponse();
-      MDC.remove(MDC_REQUEST_DURATION);
-      MDC.remove(MDC_REQUEST_ID);
     }
   }
 
-  private boolean shouldIgnore(String uri) {
-    return IGNORED_PATHS.stream().anyMatch(uri::contains);
+  private boolean shouldNotIgnore(String uri) {
+    return IGNORED_PATHS.stream().noneMatch(uri::contains);
   }
 
   private String getOriginalUri(HttpServletRequest request) {

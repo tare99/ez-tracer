@@ -1,9 +1,11 @@
 package io.github.tare99.eztracer.http;
 
+import io.github.tare99.eztracer.mask.BodyMasker;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import lombok.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,15 +19,24 @@ import org.springframework.http.client.ClientHttpResponse;
 public class TracingClientHttpInterceptor implements ClientHttpRequestInterceptor {
 
   private static final Logger log = LoggerFactory.getLogger(TracingClientHttpInterceptor.class);
+  private static final BodyMasker NO_OP_MASKER = new BodyMasker(List.of(), "");
 
   private final String label;
+  private final BodyMasker bodyMasker;
 
   public TracingClientHttpInterceptor() {
     this.label = "Third party";
+    this.bodyMasker = NO_OP_MASKER;
   }
 
   public TracingClientHttpInterceptor(String label) {
     this.label = label;
+    this.bodyMasker = NO_OP_MASKER;
+  }
+
+  public TracingClientHttpInterceptor(String label, BodyMasker bodyMasker) {
+    this.label = label;
+    this.bodyMasker = bodyMasker;
   }
 
   @Override
@@ -35,7 +46,7 @@ public class TracingClientHttpInterceptor implements ClientHttpRequestIntercepto
       throws IOException {
 
     String url = request.getURI().toString();
-    String requestBody = new String(body, StandardCharsets.UTF_8);
+    String requestBody = bodyMasker.mask(new String(body, StandardCharsets.UTF_8));
 
     log.info("{} request START {} | Body: {}", label, url, requestBody);
 
@@ -45,7 +56,7 @@ public class TracingClientHttpInterceptor implements ClientHttpRequestIntercepto
       long durationMs = (System.nanoTime() - start) / 1_000_000;
 
       byte[] responseBodyBytes = response.getBody().readAllBytes();
-      String responseBody = new String(responseBodyBytes, StandardCharsets.UTF_8);
+      String responseBody = bodyMasker.mask(new String(responseBodyBytes, StandardCharsets.UTF_8));
       log.info(
           "{} request END {} | {} | Response: {} | Time: {}ms",
           label,
